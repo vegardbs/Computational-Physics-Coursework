@@ -1,0 +1,153 @@
+#include <iostream>
+#include <armadillo>
+#include <math.h>
+#include <time.h>
+#include <fstream>
+
+using namespace std;
+using namespace arma;
+
+// Function to calculate the Gaussian distribution with mean m and stddev s.
+float box_muller(float m, float s)
+{
+    float x1, x2, w, y1;
+    static float y2;
+    static int use_last = 0;
+
+    if (use_last)
+    {
+        y1 = y2;
+        use_last = 0;
+    }
+    else
+    {
+        do {
+            x1 = 2.0 * ((double) rand() / (RAND_MAX)) - 1.0;
+            x2 = 2.0 * ((double) rand() / (RAND_MAX)) - 1.0;
+            w = x1 * x1 + x2 * x2;
+        } while ( w >= 1.0 );
+
+        w = sqrt( (-2.0 * log( w ) ) / w );
+        y1 = x1 * w;
+        y2 = x2 * w;
+        use_last = 1;
+    }
+
+    return( m + y1 * s );
+}
+
+int main()
+{
+    int MC_cycles, N_walkers;
+    double D,dt,l,pi;
+    pi = 3.14159265359;
+    D = 1;
+    dt= 0.0001;
+    l = sqrt(2*D*dt);
+    MC_cycles = 500;
+    N_walkers = 100;
+
+    int NumberBins = 1/l+1;
+    double Delta_x = 1./((double) NumberBins);
+    const double FinalTime = 0.1;
+    const int ntimesteps  = FinalTime/dt;
+
+    vector<double> position;
+
+
+    // histogram to hold the solution
+    double *hist = new double[NumberBins];
+
+    // initialize arrays
+    for (int bin =0; bin < NumberBins; bin++){
+      hist[bin] = histsquared[bin] = histtemp[bin] = stddev[bin] = 0;}
+
+
+for (int cycle =0; cycle < MC_cycles; cycle++){
+
+
+        // In the beginning of every cycle, reset to initial population
+
+        position.resize(N_walkers);
+
+        // Initialize walker array
+        for (int walker =0; walker < N_walkers; walker++) position[walker] = 0.0;
+
+        // loop over time
+        for (int step = 0; step < ntimesteps; step++){
+        double prev;
+        int addwalkers = 0;
+
+        // Loop over walkers, they will eventually produce the final histogram
+        for (int walker = 0; walker < position.size(); walker++){
+
+        prev = position[walker];  // Store previous walker position
+
+      // Steplength determined from the Gaussian distribution
+
+        double r = box_muller(0.0,(1/sqrt(2.0)));
+        position[walker] += l*r;
+
+
+     // Constant steplength movement. Comment out if using Gaussian distribution above.
+
+       if (((double) rand() / (RAND_MAX)) > 0.5){
+
+          position[walker] += l;
+        }
+        else {
+          position[walker] -= l;
+        }
+
+        // Remove walkers at x=1
+        if ( ( (position[walker] < Delta_x) && (prev >= Delta_x) ) || position[walker] >=1){
+          position.erase(position.begin()+walker);
+          walker--;
+          continue;
+        }
+
+        if (position[walker] >= Delta_x && prev < Delta_x)
+            addwalkers++;  // Add walkers as they move away from x=0
+
+        if (position[walker] < 0)
+              position[walker] = 0; // Walker moves into wall at x < 0
+
+        } // end loop over walkers
+
+        // Add 1 walker at x=0 for every walker that moved away from zero
+        for (int i = 0; i < addwalkers; i++) position.push_back(0.0);
+
+        } //end time loop
+
+
+        // Set up temporary histogram
+          for (int walker = 0; walker < position.size(); walker++)
+          histtemp[(int) floor(position[walker]/Delta_x)]++;
+
+        // Save to histogram
+          for (int bin =0; bin < NumberBins; bin++) {
+          hist[bin] += histtemp[bin];
+          histtemp[bin] = 0;
+            }
+
+
+        } // end loop over Monte Carlo cycles
+
+        // Normalize with number of Monte Carlo cycles
+        double NormFactor = 1.0/(MC_cycles);
+        for (int bin =0; bin < NumberBins; bin++) {
+          hist[bin] *=   NormFactor;
+        }
+
+// Write out data
+ofstream hist_out;
+hist_out.open("histogram");
+for(int bin=0; bin < NumberBins;bin++)
+{
+    hist_out        << bin*Delta_x <<"  "<< hist[bin] << endl;
+}
+hist_out.close();
+
+
+}
+

@@ -1,0 +1,196 @@
+#include <iostream>
+#include <armadillo>
+#include <math.h>
+#include <time.h>
+#include <fstream>
+
+using namespace std;
+using namespace arma;
+
+// Function to calculate the Gaussian distribution with mean m and stddev s.
+float box_muller(float m, float s)
+{
+    float x1, x2, w, y1;
+    static float y2;
+    static int use_last = 0;
+
+    if (use_last)
+    {
+        y1 = y2;
+        use_last = 0;
+    }
+    else
+    {
+        do {
+            x1 = 2.0 * ((double) rand() / (RAND_MAX)) - 1.0;
+            x2 = 2.0 * ((double) rand() / (RAND_MAX)) - 1.0;
+            w = x1 * x1 + x2 * x2;
+        } while ( w >= 1.0 );
+
+        w = sqrt( (-2.0 * log( w ) ) / w );
+        y1 = x1 * w;
+        y2 = x2 * w;
+        use_last = 1;
+    }
+
+    return( m + y1 * s );
+}
+
+int main()
+{
+    int MC_cycles, N_walkers;
+    double D,dt,l,pi;
+    pi = 3.14159265359;
+    D = 1;
+    dt= 0.0001;
+    l = sqrt(2*D*dt);
+    MC_cycles = 100;
+    N_walkers = 100;
+
+    int NumberBins = 1/l+1;
+    double Delta_x = 1./((double) NumberBins);
+    double Delta_y = 1./((double) NumberBins);
+    const double FinalTime = 0.1;
+    const int ntimesteps  = FinalTime/dt;
+
+    vector<double> position_x;
+    vector<double> position_y;
+    vector<double> y; // to keep track of the y coordinate of walkers moving away from x=0
+
+    // histogram to store data
+    mat hist(NumberBins,NumberBins);
+    mat hist_temp(NumberBins,NumberBins);
+
+
+
+for (int cycle =0; cycle < MC_cycles; cycle++){
+
+
+        // In the beginning of every cycle, reset to initial population
+
+        position_x.resize(N_walkers);
+        position_y.resize(N_walkers);
+        y.resize(N_walkers);
+
+        // initialize walker array
+        for (int walker =0; walker < N_walkers; walker++)
+           {
+                position_y[walker] = walker*Delta_y;
+                position_x[walker] = 0.0;
+                y[walker] = 0.0;
+           }
+
+        // loop over time
+        for (int step = 0; step < ntimesteps; step++){
+        double prev_x,prev_y;
+        int addwalkers = 0;
+
+        // Loop over walkers, they will eventually produce the final histogram
+        for (int walker = 0; walker < position_x.size(); walker++){
+
+        prev_x = position_x[walker];  // previous walker position_x
+        prev_y = position_y[walker];  // previous walker position_y
+
+        // Gaussian distributed step length, or constant if gauss = 1.
+         double gauss = box_muller(0.0,(1/sqrt(2.0)));
+        // double gauss = 1
+
+    // Equal probability of moving in either direction.
+        if (position_x[walker] < Delta_x)
+
+        {
+            position_x[walker] +=l*gauss;
+        }
+
+        else
+        {
+       double r = ((double) rand() / (RAND_MAX));
+
+       if ( r > 0.75)      { position_x[walker] += l*gauss;}
+
+       else if ( r > 0.50) { position_x[walker] -= l*gauss;}
+
+       else if ( r > 0.25) { position_y[walker] += l*gauss;}
+
+        else {position_y[walker] -= l*gauss;}
+        }
+
+           // if walker goes outside x=1 or move back into x=0 after having moved away it is removed
+         if ( ( (position_x[walker] < Delta_x) && (prev_x >= Delta_x) ) || position_x[walker] >=1){
+          position_x.erase(position_x.begin()+walker);
+          position_y.erase(position_y.begin()+walker);
+          walker--;
+          continue;
+        }
+
+        if ( (position_y[walker] >=1) ){        // if walker goes outside y=1 it is removed
+          position_x.erase(position_x.begin()+walker);
+          position_y.erase(position_y.begin()+walker);
+          walker--;
+          continue;
+        }
+
+        if ( (position_y[walker] <=0) ){        // if walker goes outside y = 0 it is removed
+          position_x.erase(position_x.begin()+walker);
+          position_y.erase(position_y.begin()+walker);
+          walker--;
+          continue;
+        }
+
+        if (position_x[walker] >= Delta_x && prev_x < Delta_x)
+        {
+            y[addwalkers] = position_y[walker]; // y coordinate of added walker
+            addwalkers++;                       // add walkers when one move away from x=0
+        }
+
+        if (position_x[walker] < 0)
+              position_x[walker] = 0; //  moves into wall at x < 0
+
+
+
+        } // end loop over walkers
+
+        // add 1 walker at x=0 for every walker that moved away from zero
+        // y coordinate stored from before
+        for (int i = 0; i < addwalkers; i++){
+            position_x.push_back(0.0);
+            position_y.push_back( y[i] );
+        }
+
+
+        } //end time loop
+
+
+        // set up temporary histogram
+          for (int walker = 0; walker < position_x.size(); walker++)
+          {
+              hist_temp((int)floor(position_x[walker]/Delta_x),(int)floor(position_y[walker]/(Delta_y)))++;
+          }
+
+          for (int bin =0; bin < NumberBins; bin++) {
+              for (int bin2=0;bin2< NumberBins;bin2++)
+              {
+                hist(bin,bin2) += hist_temp(bin,bin2);
+                hist_temp(bin,bin2) = 0;
+            }}
+
+
+        } // end loop over Monte Carlo cycles
+
+       // Normalize with number of Monte Carlo cycles
+        double NormFactor = 1.0/(MC_cycles);
+        for (int bin =0; bin < NumberBins; bin++) {
+            for (int bin2=0; bin2 < NumberBins; bin2++)
+            {
+              hist(bin,bin2) *=   NormFactor;
+            }
+
+        }
+
+// write out data in matrix
+ofstream hist_out;
+hist_out.open("histogram");
+hist_out << hist<< endl;
+hist_out.close();
+
+}
